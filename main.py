@@ -1,5 +1,8 @@
 import sys
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
+
+import requests
+from bs4 import BeautifulSoup
 
 HOSTS = ("volby.cz", "www.volby.cz", "volby.gov.cz", "www.volby.gov.cz")
 EXAMPLE = ('python main.py "https://www.volby.cz/pls/ps2017nss/ps32?'
@@ -32,9 +35,36 @@ def check_arguments(args):
     return url, file_name
 
 
+def download_page(session, url):
+    response = session.get(url, timeout=30)
+    response.raise_for_status()
+    response.encoding = "utf-8"
+    return BeautifulSoup(response.text, "html.parser")
+
+
+def get_municipalities(soup, url):
+    """Vrátí seznam obcí ve tvaru (kód, název, odkaz na výsledky)."""
+    municipalities = []
+    for cell in soup.find_all("td", class_="cislo"):
+        link = cell.find("a")
+        if not link:
+            continue
+        name = cell.find_next_sibling("td").get_text(strip=True)
+        municipalities.append(
+            (link.get_text(strip=True), name, urljoin(url, link["href"]))
+        )
+    return municipalities
+
+
 def main():
     url, file_name = check_arguments(sys.argv)
     print("STAHUJI DATA Z VYBRANEHO URL:", url)
+
+    session = requests.Session()
+    municipalities = get_municipalities(download_page(session, url), url)
+    for code, name, link in municipalities:
+        print(code, name, link)
+    print("Počet obcí:", len(municipalities))
 
 
 if __name__ == "__main__":
