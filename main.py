@@ -42,6 +42,11 @@ def download_page(session, url):
     return BeautifulSoup(response.text, "html.parser")
 
 
+def to_number(text):
+    # čísla jsou na webu s mezerou (nbsp) mezi tisíci, např. "13 104"
+    return int(text.replace("\xa0", "").replace(" ", ""))
+
+
 def get_municipalities(soup, url):
     """Vrátí seznam obcí ve tvaru (kód, název, odkaz na výsledky)."""
     municipalities = []
@@ -56,15 +61,44 @@ def get_municipalities(soup, url):
     return municipalities
 
 
+def get_results(soup):
+    """Z výsledků jedné obce vytáhne voliče, obálky, platné hlasy
+    a slovník hlasů pro jednotlivé strany."""
+    registered = to_number(soup.find("td", headers="sa2").get_text())
+    envelopes = to_number(soup.find("td", headers="sa3").get_text())
+    valid = to_number(soup.find("td", headers="sa6").get_text())
+
+    # strany jsou rozdělené do dvou tabulek (t1 a t2)
+    names = soup.find_all("td", headers=["t1sb2", "t2sb2"])
+    counts = soup.find_all("td", headers=["t1sb3", "t2sb3"])
+    votes = {}
+    for name, count in zip(names, counts):
+        if count.get_text(strip=True) == "-":
+            continue
+        votes[name.get_text(strip=True)] = to_number(count.get_text())
+
+    return registered, envelopes, valid, votes
+
+
 def main():
     url, file_name = check_arguments(sys.argv)
     print("STAHUJI DATA Z VYBRANEHO URL:", url)
 
     session = requests.Session()
-    municipalities = get_municipalities(download_page(session, url), url)
-    for code, name, link in municipalities:
-        print(code, name, link)
-    print("Počet obcí:", len(municipalities))
+    try:
+        municipalities = get_municipalities(download_page(session, url), url)
+        if not municipalities:
+            print("Na stránce nejsou žádné obce, zkontroluj odkaz.")
+            sys.exit(1)
+
+        for code, name, link in municipalities:
+            registered, envelopes, valid, votes = get_results(
+                download_page(session, link)
+            )
+            print(code, name, registered, envelopes, valid, len(votes))
+    except requests.RequestException as error:
+        print("Nepodařilo se stáhnout data:", error)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
