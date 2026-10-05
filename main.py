@@ -1,3 +1,5 @@
+"""Elections Scraper: výsledky voleb 2017 pro vybraný okres do CSV."""
+
 import csv
 import sys
 from urllib.parse import urljoin, urlparse
@@ -11,8 +13,11 @@ EXAMPLE = ('python main.py "https://www.volby.cz/pls/ps2017nss/ps32?'
 
 
 def check_arguments(args):
-    """Zkontroluje argumenty z příkazové řádky a vrátí odkaz a název
-    souboru. Když něco nesedí, vypíše proč a ukončí program."""
+    """Zkontroluje argumenty z příkazové řádky.
+
+    Vrátí odkaz a název souboru. Když něco nesedí, vypíše proč
+    a ukončí program.
+    """
     if len(args) != 3:
         print("Program potřebuje 2 argumenty: odkaz na územní celek "
               "a název výstupního souboru.")
@@ -37,6 +42,7 @@ def check_arguments(args):
 
 
 def download_page(session, url):
+    """Stáhne stránku a vrátí ji jako BeautifulSoup objekt."""
     response = session.get(url, timeout=30)
     response.raise_for_status()
     response.encoding = "utf-8"
@@ -44,7 +50,7 @@ def download_page(session, url):
 
 
 def to_number(text):
-    # čísla jsou na webu s mezerou (nbsp) mezi tisíci, např. "13 104"
+    """Převede číslo z webu na int, mezi tisíci je mezera (nbsp)."""
     return int(text.replace("\xa0", "").replace(" ", ""))
 
 
@@ -63,8 +69,11 @@ def get_municipalities(soup, url):
 
 
 def get_results(soup):
-    """Z výsledků jedné obce vytáhne voliče, obálky, platné hlasy
-    a slovník hlasů pro jednotlivé strany."""
+    """Vytáhne výsledky jedné obce.
+
+    Vrátí počet voličů, vydaných obálek, platných hlasů a slovník
+    hlasů pro jednotlivé strany.
+    """
     registered = to_number(soup.find("td", headers="sa2").get_text())
     envelopes = to_number(soup.find("td", headers="sa3").get_text())
     valid = to_number(soup.find("td", headers="sa6").get_text())
@@ -82,6 +91,7 @@ def get_results(soup):
 
 
 def save_csv(file_name, rows, parties):
+    """Uloží výsledky obcí do CSV souboru včetně hlavičky."""
     header = ["code", "location", "registered", "envelopes", "valid"]
     # utf-8-sig, aby Excel správně zobrazil diakritiku
     with open(file_name, "w", newline="", encoding="utf-8-sig") as file:
@@ -91,6 +101,7 @@ def save_csv(file_name, rows, parties):
 
 
 def main():
+    """Stáhne výsledky všech obcí z okresu a uloží je do CSV."""
     url, file_name = check_arguments(sys.argv)
     print("STAHUJI DATA Z VYBRANEHO URL:", url)
 
