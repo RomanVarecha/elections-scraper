@@ -1,3 +1,4 @@
+import csv
 import sys
 from urllib.parse import urljoin, urlparse
 
@@ -80,25 +81,50 @@ def get_results(soup):
     return registered, envelopes, valid, votes
 
 
+def save_csv(file_name, rows, parties):
+    header = ["code", "location", "registered", "envelopes", "valid"]
+    # utf-8-sig, aby Excel správně zobrazil diakritiku
+    with open(file_name, "w", newline="", encoding="utf-8-sig") as file:
+        writer = csv.writer(file)
+        writer.writerow(header + parties)
+        writer.writerows(rows)
+
+
 def main():
     url, file_name = check_arguments(sys.argv)
     print("STAHUJI DATA Z VYBRANEHO URL:", url)
 
     session = requests.Session()
+    parties = []
+    results = []
     try:
         municipalities = get_municipalities(download_page(session, url), url)
         if not municipalities:
             print("Na stránce nejsou žádné obce, zkontroluj odkaz.")
             sys.exit(1)
 
-        for code, name, link in municipalities:
+        for number, (code, name, link) in enumerate(municipalities, 1):
+            print(f"\robec {number}/{len(municipalities)}", end="")
             registered, envelopes, valid, votes = get_results(
                 download_page(session, link)
             )
-            print(code, name, registered, envelopes, valid, len(votes))
+            for party in votes:
+                if party not in parties:
+                    parties.append(party)
+            results.append((code, name, registered, envelopes, valid, votes))
+        print()
     except requests.RequestException as error:
-        print("Nepodařilo se stáhnout data:", error)
+        print("\nNepodařilo se stáhnout data:", error)
         sys.exit(1)
+
+    rows = []
+    for code, name, registered, envelopes, valid, votes in results:
+        party_votes = [votes.get(party, 0) for party in parties]
+        rows.append([code, name, registered, envelopes, valid] + party_votes)
+
+    print("UKLADAM DO SOUBORU:", file_name)
+    save_csv(file_name, rows, parties)
+    print("UKONCUJI election-scraper")
 
 
 if __name__ == "__main__":
