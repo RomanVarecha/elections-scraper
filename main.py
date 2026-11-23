@@ -2,6 +2,7 @@
 
 import csv
 import sys
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -12,7 +13,7 @@ EXAMPLE = ('python main.py "https://www.volby.cz/pls/ps2017nss/ps32?'
            'xjazyk=CZ&xkraj=13&xnumnuts=7201" vysledky_kromeriz.csv')
 
 
-def check_arguments(args):
+def check_arguments(args: list[str]) -> tuple[str, str]:
     """Zkontroluje argumenty z příkazové řádky.
 
     Vrátí odkaz a název souboru. Když něco nesedí, vypíše proč
@@ -26,8 +27,8 @@ def check_arguments(args):
 
     url, file_name = args[1], args[2]
     address = urlparse(url)
-    if address.netloc not in HOSTS or \
-            not address.path.endswith("/ps2017nss/ps32"):
+    if (address.netloc not in HOSTS
+            or not address.path.endswith("/ps2017nss/ps32")):
         print("První argument musí být odkaz na územní celek z volby.cz "
               "(stránka se seznamem obcí, ve výsledcích sloupec "
               "'Výběr obce').")
@@ -41,7 +42,7 @@ def check_arguments(args):
     return url, file_name
 
 
-def download_page(session, url):
+def download_page(session: requests.Session, url: str) -> BeautifulSoup:
     """Stáhne stránku a vrátí ji jako BeautifulSoup objekt."""
     response = session.get(url, timeout=30)
     response.raise_for_status()
@@ -49,12 +50,14 @@ def download_page(session, url):
     return BeautifulSoup(response.text, "html.parser")
 
 
-def to_number(text):
+def to_number(text: str) -> int:
     """Převede číslo z webu na int, mezi tisíci je mezera (nbsp)."""
     return int(text.replace("\xa0", "").replace(" ", ""))
 
 
-def get_municipalities(soup, url):
+def get_municipalities(
+    soup: BeautifulSoup, url: str
+) -> list[tuple[str, str, str]]:
     """Vrátí seznam obcí ve tvaru (kód, název, odkaz na výsledky)."""
     municipalities = []
     for cell in soup.find_all("td", class_="cislo"):
@@ -68,7 +71,7 @@ def get_municipalities(soup, url):
     return municipalities
 
 
-def get_results(soup):
+def get_results(soup: BeautifulSoup) -> tuple[int, int, int, dict[str, int]]:
     """Vytáhne výsledky jedné obce.
 
     Vrátí počet voličů, vydaných obálek, platných hlasů a slovník
@@ -90,7 +93,9 @@ def get_results(soup):
     return registered, envelopes, valid, votes
 
 
-def save_csv(file_name, rows, parties):
+def save_csv(
+    file_name: str, rows: list[list[Any]], parties: list[str]
+) -> None:
     """Uloží výsledky obcí do CSV souboru včetně hlavičky."""
     header = ["code", "location", "registered", "envelopes", "valid"]
     # utf-8-sig, aby Excel správně zobrazil diakritiku
@@ -100,41 +105,55 @@ def save_csv(file_name, rows, parties):
         writer.writerows(rows)
 
 
-def main():
+def scrape_municipalities(
+    session: requests.Session, municipalities: list[tuple[str, str, str]]
+) -> tuple[list[tuple], list[str]]:
+    """Stáhne výsledky všech obcí.
+
+    Vrátí výsledky obcí a seznam stran v pořadí, v jakém se na webu objevily.
+    """
+    parties = []
+    results = []
+    for number, (code, name, link) in enumerate(municipalities, 1):
+        print(f"\robec {number}/{len(municipalities)}", end="")
+        registered, envelopes, valid, votes = get_results(
+            download_page(session, link)
+        )
+        for party in votes:
+            if party not in parties:
+                parties.append(party)
+        results.append((code, name, registered, envelopes, valid, votes))
+    print()
+    return results, parties
+
+
+def build_rows(results: list[tuple], parties: list[str]) -> list[list[Any]]:
+    """Převede výsledky obcí na řádky CSV, chybějící strana má 0 hlasů."""
+    rows = []
+    for code, name, registered, envelopes, valid, votes in results:
+        party_votes = [votes.get(party, 0) for party in parties]
+        rows.append([code, name, registered, envelopes, valid] + party_votes)
+    return rows
+
+
+def main() -> None:
     """Stáhne výsledky všech obcí z okresu a uloží je do CSV."""
     url, file_name = check_arguments(sys.argv)
     print("STAHUJI DATA Z VYBRANEHO URL:", url)
 
     session = requests.Session()
-    parties = []
-    results = []
     try:
         municipalities = get_municipalities(download_page(session, url), url)
         if not municipalities:
             print("Na stránce nejsou žádné obce, zkontroluj odkaz.")
             sys.exit(1)
-
-        for number, (code, name, link) in enumerate(municipalities, 1):
-            print(f"\robec {number}/{len(municipalities)}", end="")
-            registered, envelopes, valid, votes = get_results(
-                download_page(session, link)
-            )
-            for party in votes:
-                if party not in parties:
-                    parties.append(party)
-            results.append((code, name, registered, envelopes, valid, votes))
-        print()
+        results, parties = scrape_municipalities(session, municipalities)
     except requests.RequestException as error:
         print("\nNepodařilo se stáhnout data:", error)
         sys.exit(1)
 
-    rows = []
-    for code, name, registered, envelopes, valid, votes in results:
-        party_votes = [votes.get(party, 0) for party in parties]
-        rows.append([code, name, registered, envelopes, valid] + party_votes)
-
     print("UKLADAM DO SOUBORU:", file_name)
-    save_csv(file_name, rows, parties)
+    save_csv(file_name, build_rows(results, parties), parties)
     print("UKONCUJI election-scraper")
 
 
